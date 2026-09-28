@@ -8,6 +8,7 @@ use Zain\Jev\Answers\Answer;
 use Zain\Jev\Answers\ChoiceAnswer;
 use Zain\Jev\Answers\NoulAnswer;
 use Zain\Jev\Answers\ScoreAnswer;
+use Zain\Jev\Exceptions\JevException;
 use Zain\Jev\Exceptions\MissingAnswer;
 
 /**
@@ -109,6 +110,12 @@ final class Result
     /** @param array<string, mixed> $answer */
     private static function answerFromArray(array $answer): Answer
     {
+        $noul = $answer['noul'] ?? null;
+        if (($answer['type'] ?? null) === 'noul'
+            && ((! is_int($noul) && ! is_float($noul)) || ! is_finite((float) $noul) || $noul < 0 || $noul > 1)) {
+            throw new JevException('A noul answer must contain a finite numeric probability between 0 and 1.');
+        }
+
         return match ($answer['type'] ?? null) {
             'choice' => new ChoiceAnswer(
                 (string) ($answer['choice'] ?? ''),
@@ -121,7 +128,8 @@ final class Result
                 array_map('floatval', (array) ($answer['probabilities'] ?? [])),
                 (float) ($answer['confidence'] ?? 0.0),
             ),
-            default => new NoulAnswer((float) ($answer['noul'] ?? 0.0)),
+            'noul' => new NoulAnswer((float) $noul),
+            default => throw new JevException('The response contains an unknown or missing answer type.'),
         };
     }
 }
