@@ -210,6 +210,12 @@ Everything thrown extends `Zain\Jev\Exceptions\JevException`.
 | `InvalidQuestion` | a question was built wrongly, thrown before sending |
 | `MissingAnswer` | an answer read by the wrong name or the wrong type |
 
+Response decoding throws `JevException` for a missing or unknown answer type, or a `noul`
+answer without a finite numeric probability from 0 to 1. Missing values, numeric strings,
+booleans and out-of-range numbers are rejected instead of being cast into an answer.
+These decoding failures are not retried. This check does not validate the remaining fields
+of choice/score answers or match response types to the original questions.
+
 Rate limits, overload and connection failures are retried automatically with exponential backoff
 and jitter, honouring `Retry-After`. A rejected request is never retried. Tune or switch it off:
 

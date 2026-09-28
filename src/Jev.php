@@ -83,6 +83,7 @@ final class Jev
      * @throws InvalidQuestion      when the request could not be built
      * @throws ApiException         when the API rejects or fails the request
      * @throws ConnectionException  when the request never reached the API
+     * @throws JevException         when an answer type or noul probability is invalid
      */
     public function ask(string|array $state, array $questions): Result
     {

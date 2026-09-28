@@ -5,15 +5,18 @@ declare(strict_types=1);
 namespace Zain\Jev\Tests;
 
 use Nyholm\Psr7\Factory\Psr17Factory;
+use PHPUnit\Framework\Attributes\TestWith;
 use PHPUnit\Framework\TestCase;
 use Zain\Jev\Exceptions\AuthenticationException;
 use Zain\Jev\Exceptions\ConnectionException;
 use Zain\Jev\Exceptions\InvalidQuestion;
+use Zain\Jev\Exceptions\JevException;
 use Zain\Jev\Exceptions\MissingAnswer;
 use Zain\Jev\Exceptions\RateLimitException;
 use Zain\Jev\Exceptions\ValidationException;
 use Zain\Jev\Jev;
 use Zain\Jev\Question;
+use Zain\Jev\Result;
 use Zain\Jev\RetryPolicy;
 
 final class JevTest extends TestCase
@@ -101,15 +104,60 @@ final class JevTest extends TestCase
         self::assertSame(412, $result->usage->inputTokens);
     }
 
-    public function test_a_yes_no_answer_is_least_confident_at_one_half(): void
+    #[TestWith([0, 0.0, 1.0, false])]
+    #[TestWith([0.0, 0.0, 1.0, false])]
+    #[TestWith([0.5, 0.5, 0.0, false])]
+    #[TestWith([1, 1.0, 1.0, true])]
+    #[TestWith([1.0, 1.0, 1.0, true])]
+    public function test_yes_no_answers_preserve_valid_probabilities_and_confidence(int|float $probability, float $expected, float $confidence, bool $isTrue): void
     {
-        $this->http->willReturn(['answers' => ['sure' => ['type' => 'noul', 'noul' => 0.5]]]);
+        $this->http->willReturnRaw(json_encode(['answers' => ['sure' => ['type' => 'noul', 'noul' => $probability]]], JSON_THROW_ON_ERROR | JSON_PRESERVE_ZERO_FRACTION), 200);
 
-        // A yes/no answer carries no confidence field, so 0.5 -- no information -- must read as
-        // no confidence rather than as a positive answer.
         $answer = $this->jev()->ask('x', ['sure' => Question::noul('?')])->noul('sure');
-        self::assertSame(0.0, $answer->confidence());
-        self::assertFalse($answer->isTrue(0.51));
+
+        self::assertSame($expected, $answer->probability);
+        self::assertSame($confidence, $answer->confidence());
+        self::assertSame($isTrue, $answer->isTrue(0.51));
+    }
+
+    #[TestWith([[]])]
+    #[TestWith([['noul' => 0.5]])]
+    #[TestWith([['type' => null]])]
+    #[TestWith([['type' => 'unknown']])]
+    #[TestWith([['type' => false]])]
+    #[TestWith([['type' => 0]])]
+    #[TestWith([['type' => []]])]
+    public function test_it_rejects_unknown_or_missing_answer_types(array $answer): void
+    {
+        $this->http->willReturn(['answers' => ['q' => $answer]]);
+        $this->expectException(JevException::class);
+        $this->expectExceptionMessage('The response contains an unknown or missing answer type.');
+
+        try {
+            $this->jev(new RetryPolicy(maxAttempts: 3, baseDelay: 0.0))->ask('x', ['q' => Question::noul('?')]);
+        } finally {
+            self::assertSame(1, $this->http->requestCount());
+        }
+    }
+
+    #[TestWith([['type' => 'noul']])]
+    #[TestWith([['type' => 'noul', 'noul' => null]])]
+    #[TestWith([['type' => 'noul', 'noul' => 'not a number']])]
+    #[TestWith([['type' => 'noul', 'noul' => '0.5']])]
+    #[TestWith([['type' => 'noul', 'noul' => false]])]
+    #[TestWith([['type' => 'noul', 'noul' => true]])]
+    #[TestWith([['type' => 'noul', 'noul' => []]])]
+    #[TestWith([['type' => 'noul', 'noul' => -0.01]])]
+    #[TestWith([['type' => 'noul', 'noul' => 1.01]])]
+    #[TestWith([['type' => 'noul', 'noul' => INF]])]
+    #[TestWith([['type' => 'noul', 'noul' => -INF]])]
+    #[TestWith([['type' => 'noul', 'noul' => NAN]])]
+    public function test_it_rejects_invalid_noul_probabilities(array $answer): void
+    {
+        $this->expectException(JevException::class);
+        $this->expectExceptionMessage('A noul answer must contain a finite numeric probability between 0 and 1.');
+
+        Result::fromArray(['answers' => ['q' => $answer]]);
     }
 
     public function test_it_ranks_choices_and_reports_which_answers_were_uncertain(): void
